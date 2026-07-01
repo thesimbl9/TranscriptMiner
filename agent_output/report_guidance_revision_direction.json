@@ -1,0 +1,149 @@
+{
+  "iteration": 1,
+  "feature_spec": {
+    "feature_name": "guidance_revision_direction",
+    "definition": "管理层本季度对下季度/全年营收或EPS guidance的调整方向：上调为正，维持为0，下调为负",
+    "extraction_instruction": "阅读以下财报电话会议片段，判断管理层是否明确上调、维持或下调了未来的业绩指引（guidance）。重点关注具体数字变化、'raised'/'increased'/'lowered'/'withdrawn'等关键词。输出：2=明确强力上调, 1=小幅上调, 0=维持/无明确指引, -1=小幅下调, -2=明确强力下调。",
+    "retrieval_query": "revenue guidance raised target next quarter growth outlook increased",
+    "expected_ic_direction": "+",
+    "condition_scope": {
+      "section_type": [
+        "prepared",
+        "qa"
+      ],
+      "speaker_role": [
+        "mgmt"
+      ],
+      "sector": null
+    },
+    "top_k": 15,
+    "score_range": [
+      -2,
+      2
+    ]
+  },
+  "val_result": {
+    "feature_name": "guidance_revision_direction",
+    "ic": 0.1153,
+    "t_stat": 3.096,
+    "n_quarters": 12,
+    "zero_ratio": 0.662,
+    "per_sector_ic": {
+      "Basic Materials": 0.3858,
+      "Communication Services": -0.4784,
+      "Consumer Cyclical": 0.2393,
+      "Consumer Defensive": 0.1471,
+      "Energy": 0.1985,
+      "Financial Services": 0.2047,
+      "Healthcare": 0.1853,
+      "Industrials": 0.2056,
+      "Real Estate": 0.1542,
+      "Technology": 0.0651,
+      "Utilities": 0.2106
+    },
+    "direction_consistency": 0.909,
+    "score_dist": {
+      "-1.0": 0.021,
+      "0.0": 0.662,
+      "1.0": 0.133,
+      "2.0": 0.184
+    },
+    "zero_by_sector": {
+      "Basic Materials": 0.62,
+      "Communication Services": 0.632,
+      "Consumer Cyclical": 0.669,
+      "Consumer Defensive": 0.631,
+      "Energy": 0.667,
+      "Financial Services": 0.818,
+      "Healthcare": 0.621,
+      "Industrials": 0.632,
+      "Real Estate": 0.569,
+      "Technology": 0.694,
+      "Utilities": 0.727
+    },
+    "zero_by_year": {
+      "2015": 0.656,
+      "2016": 0.72,
+      "2017": 0.66,
+      "2018": 0.693,
+      "2019": 0.653,
+      "2020": 0.671,
+      "2021": 0.614,
+      "2022": 0.684,
+      "2023": 0.639
+    }
+  },
+  "gov_result": {
+    "feature_name": "guidance_revision_direction",
+    "passed": false,
+    "failures": [
+      "G2_zero_ratio: 66.2% >= 45%"
+    ],
+    "feedback": "特征 'guidance_revision_direction' 未通过治理检查（1 项失败）：\n  - G2_zero_ratio: 66.2% >= 45%",
+    "ic": 0.1153,
+    "t_stat": 3.096,
+    "zero_ratio": 0.662,
+    "direction_consistency": 0.909,
+    "score_dist": {
+      "-1.0": 0.021,
+      "0.0": 0.662,
+      "1.0": 0.133,
+      "2.0": 0.184
+    },
+    "zero_by_sector": {
+      "Basic Materials": 0.62,
+      "Communication Services": 0.632,
+      "Consumer Cyclical": 0.669,
+      "Consumer Defensive": 0.631,
+      "Energy": 0.667,
+      "Financial Services": 0.818,
+      "Healthcare": 0.621,
+      "Industrials": 0.632,
+      "Real Estate": 0.569,
+      "Technology": 0.694,
+      "Utilities": 0.727
+    },
+    "zero_by_year": {
+      "2015": 0.656,
+      "2016": 0.72,
+      "2017": 0.66,
+      "2018": 0.693,
+      "2019": 0.653,
+      "2020": 0.671,
+      "2021": 0.614,
+      "2022": 0.684,
+      "2023": 0.639
+    },
+    "diagnosis": {
+      "root_cause": "零值比例过高（66.2%）主要源于extraction_instruction对“小幅调整”的识别门槛过严，导致大量实际有方向性调整的样本被归为0，尤其在Financial Services等行业指引披露不频繁时更明显。",
+      "fix": "修改extraction_instruction，明确要求模型识别“隐含调整”（如语气、对比历史区间），并将输出类别简化为三档（上调=1，维持=0，下调=-1），同时增加示例说明“小幅上调/下调”的典型表述（如“slightly above”“modestly lower”），降低零值率。",
+      "avoid": "不要直接放宽所有样本的阈值，否则会引入噪声，应优先通过示例和上下文增强对细微调整的捕捉能力。",
+      "rag_refs": [
+        {
+          "paper": "From Hypotheses to Factors Constrained LLM Agents in Cryptocurrency Markets",
+          "page": 7,
+          "score": 0.5792
+        },
+        {
+          "paper": "From Text to Alpha Can LLMs Track Evolving Signals in Corporate Disclosures",
+          "page": 6,
+          "score": 0.54
+        },
+        {
+          "paper": "Same Company Same Signal The Role of Identity in Earnings Call Transcripts",
+          "page": 9,
+          "score": 0.5378
+        },
+        {
+          "paper": "SAE-FiRE Enhancing Earnings Surprise Predictions Through Sparse Autoencoder Feature Selection",
+          "page": 8,
+          "score": 0.5348
+        }
+      ],
+      "queries_used": [
+        "sparse coverage LLM scoring conservative zero inflation valid signal earnings call"
+      ]
+    }
+  },
+  "level": "L3_full"
+}

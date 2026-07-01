@@ -1,0 +1,61 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# Virtual environments
+venv/
+.venv/
+env/
+
+# Sensitive
+.env
+设计日志.md
+
+# Papers (large PDFs, users download via phase0_pipeline/papers/README.txt)
+papers/
+
+# Legacy phase0 scripts (local use only, superseded by phase0_pipeline/)
+phase0_indexing.py
+phase0_theory_index.py
+phase0_verify.py
+
+# Model weights (users download BGE-M3 via phase0_pipeline/model/README.txt)
+model/*
+!model/.gitkeep
+!model/README.txt
+
+# Vector store (large binary files, ~3.9GB)
+vector_store/faiss.index
+vector_store/theory_index.faiss
+vector_store/metadata.parquet
+vector_store/theory_metadata.parquet
+
+# Agent output (generated CSVs, logs)
+agent_output/*.csv
+agent_output/*.json
+agent_output/*.txt
+agent_output/debug/
+
+#   Exempt: 3 PASS feature examples (formula + extracted data)
+!agent_output/qa_spontaneity.csv
+!agent_output/report_qa_spontaneity.json
+!agent_output/mgmt_tone_confidence.csv
+!agent_output/report_mgmt_tone_confidence.json
+!agent_output/guidance_revision_direction.csv
+!agent_output/report_guidance_revision_direction.json
+
+logs/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db

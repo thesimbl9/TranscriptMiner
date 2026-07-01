@@ -1,0 +1,6 @@
+torch>=2.0.0
+transformers>=4.36.0
+faiss-cpu>=1.7.4
+numpy>=1.24.0
+pandas>=2.0.0
+pypdf>=3.0.0
