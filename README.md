@@ -60,13 +60,13 @@ Phase 0 (One-time)               Phase 1 (Agent Loop)
 HypothesisAgent retrieves relevant theory from 20 academic papers (indexed via BGE-M3 embeddings) across 6 domain-specific clusters: tone_sentiment, information_asymmetry, forward_guidance, qa_subjectivity, managerial_behavior, alpha_discovery. The LLM reads the theory FIRST, then derives a feature specification — not the other way around.
 
 ### 2. Explicit Multi-Metric Governance
-Unlike AlphaAgent (regularization-based) or FactorMiner (correlation-filtered), GovernanceAgent enforces:
+GovernanceAgent enforces four hard rules, each with a clear PASS/FAIL rationale:
 - **G1**: IC magnitude (>|0.015|)
 - **G2**: zero_ratio (uniform ≤0.70, concentrated ≤0.45) — with automated zero-type classification
 - **G3**: |t-stat| ≥ 1.5
 - **G4**: direction_consistency ≥ 60%
 
-Every rule is human-auditable with a clear PASS/FAIL rationale.
+Every rule is human-auditable. No black-box quality scores.
 
 ### 3. Autonomous Diagnosis & Repair Loop
 When a feature fails governance, DiagnosisAgent:
@@ -81,17 +81,20 @@ When a feature fails governance, DiagnosisAgent:
 
 ```bash
 # 1. Install dependencies
-pip install numpy pandas scipy lightgbm faiss-gpu torch transformers openai python-dotenv
+pip install -r requirements.txt
 
 # 2. Configure API key
 echo "SILICONFLOW_API_KEY=your_key_here" > .env
 
-# 3. Run Phase 0 (one-time, builds indices from transcripts and papers)
-python phase0_indexing.py    # transcript chunk index (~95万 embeddings, ~3.9GB)
-python phase0_theory_index.py # theory paper index (20 papers)
-python phase0_verify.py       # verify index quality
+# 3. Run Phase 0 (one-time, builds FAISS indices from transcripts and papers)
+#    See phase0_pipeline/README.md for detailed instructions
+cd phase0_pipeline
+pip install -r requirements.txt
+python build_transcript_index.py      # transcript chunk index (~95万 embeddings, ~3.9GB)
+python build_theory_index.py          # theory paper index (20 papers)
 
 # 4. Run the Agent loop
+cd ..
 python run_agent.py --max-iter 20
 # Output: agent_output/{feature_name}.csv, feature_history.jsonl
 
@@ -116,16 +119,6 @@ Full-sample evaluation (aligned with MASTER / AlphaAgent standard methodology):
 - Generated **13** governance-passing features, **7** with positive OOS IC
 - One complete 3-generation iterative refinement trajectory verified
 
-## Competitor Comparison
-
-| Feature | AlphaAgent (KDD'25) | FactorMiner (2026) | R&D-Agent-Quant (NeurIPS) | **This Project** |
-|---------|---------------------|--------------------|---------------------------|-------------------|
-| RAG hypothesis generation | ❌ | ❌ | ❌ | **✅** 6-cluster theory |
-| Explicit quality governance | Regularization | Correlation filter | Dedup + validate | **✅** 4-rule scorecard |
-| Root-cause diagnosis | ❌ | ❌ | ❌ | **✅** |
-| Autonomous repair loop | ❌ | ❌ | ❌ | **✅** |
-| Audit trail | Partial | Partial | Partial | **✅** feature_history.jsonl |
-
 ## Limitations & Future Work
 
 - **Single transcript source**: Framework currently tested on earnings calls only; migration to analyst reports, 10-K filings, and FOMC minutes is architecturally supported but not yet executed
@@ -144,24 +137,24 @@ Fullproject/
 │   ├── validation_agent.py        # IC / t-stat evaluation (LightGBM walk-forward)
 │   ├── governance_agent.py        # Hard-rule PASS/FAIL filtering
 │   ├── diagnosis_agent.py         # Root-cause analysis & repair spec generation
-│   └── feature_history.jsonl      # Append-only audit trail
+│   └── feature_history.jsonl      # Append-only audit trail (160 KB)
+├── phase0_pipeline/               # Generic FAISS index builder (self-contained)
+│   ├── build_transcript_index.py  # Earnings call transcripts → FAISS
+│   ├── build_theory_index.py      # Academic papers → FAISS
+│   └── requirements.txt
 ├── run_agent.py                   # Main loop orchestration
-├── fusion_eval.py                 # Multi-factor fusion evaluation
-├── phase0_indexing.py             # Transcript chunk indexing (BGE-M3)
-├── phase0_theory_index.py         # Paper theory indexing
-├── phase0_verify.py               # Index quality verification
-├── papers/                        # 20 academic papers (PDF)
-├── vector_store/                  # FAISS indices (~3.9GB)
-├── agent_output/                  # Feature CSVs, evaluation results
-├── logs/                          # Phase 0 logs
-├── 设计日志.md                     # Design discussion log (Chinese)
-└── .env                           # API keys (not committed)
+├── fusion_eval.py                 # Multi-factor fusion evaluation vs M0 baseline
+├── demo_agent_visualization.ipynb # Interactive pipeline replay (no GPU needed)
+├── data/
+│   └── sp500_events.parquet       # S&P 500 earnings event metadata (1.5 MB)
+├── agent_output/                  # 3 example features (CSV + report JSON)
+├── vector_store/                  # FAISS indices (build via phase0_pipeline)
+├── model/                         # BGE-M3 weights (download separately)
+└── requirements.txt               # Python dependencies
 ```
 
 ## References
 
-- AlphaAgent: *LLM-Driven Alpha Mining with Regularized Exploration* (KDD 2025)
-- FactorMiner: *A Self-Evolving Agent with Skills and Experience Memory* (2026)
-- R&D-Agent-Quant: *Multi-Agent Framework for Factors and Model Joint Optimization* (NeurIPS 2025)
-- MASTER: *Multimodal Alpha Research* (AAAI 2024)
-- *From Text to Alpha: Can LLMs Track Evolving Signals in Corporate Disclosures*
+- MASTER: *Multimodal Alpha Research* (AAAI 2024) — market-adaptive multimodal stock selection
+- *From Text to Alpha: Can LLMs Track Evolving Signals in Corporate Disclosures* — LLM-based text signal extraction
+- BGE-M3: *Multi-Lingual, Multi-Granularity Text Embedding* — embedding model used in RAG pipeline
