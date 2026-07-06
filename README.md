@@ -156,6 +156,174 @@ python viz_demo/build_demo.py
 - `qa_spontaneity`: residual IC = **+0.043**
 - `guidance_revision_direction` (v3): residual IC = **+0.033**
 
+## Live Demo: End-to-End Pipeline Walkthrough
+
+Below is the complete lifecycle of `contrastive_connectives` — the **star repair case** that went from G2 FAIL to PASS through autonomous closed-loop repair. No file download needed.
+
+---
+
+### Stage 1 — HypothesisAgent: Theory-First Feature Generation
+
+**Selected Theory Cluster**: `information_asymmetry`
+
+The agent retrieves 8 relevant paper chunks from the FAISS theory index (BGE-M3 embeddings):
+
+| Paper | Page | Score |
+|-------|------|-------|
+| Capturing dynamics of PEAD using genetic algorithm | 3 | 0.667 |
+| Extracting the Structure of Press Releases | 1 | 0.647 |
+| Extracting the Structure of Press Releases | 5 | 0.624 |
+| Capturing dynamics of PEAD using genetic algorithm | 2 | 0.624 |
+| Text analysis in financial disclosures | 13 | 0.607 |
+| Corporate Earnings Calls and Analyst Beliefs | 22 | 0.602 |
+| Text analysis in financial disclosures | 22 | 0.596 |
+| Corporate Earnings Calls and Analyst Beliefs | 42 | 0.588 |
+
+**Core Theory Basis** (from *Corporate Earnings Calls and Analyst Beliefs*, p.22):
+> *"The patterns reveal familiar asymmetries in analysts' reactions: forecast errors rise monotonically with SUE, with a steep transition around modest negative surprises and saturation in the tails."*
+
+→ Implication: analysts react more to negative surprises; management uses contrastive language (`but`, `however`, `although`) to soften bad news → higher contrastive density signals greater information asymmetry → negative future returns.
+
+<details>
+<summary><b>📋 Full Feature Spec (JSON)</b></summary>
+
+```json
+{
+  "feature_name": "contrastive_connectives",
+  "definition": "Frequency of contrastive connectives (but, however, although, yet, while, despite, in contrast, on the other hand, whereas, though, albeit) in management speech. Higher frequency suggests management is balancing negative information, increasing information asymmetry.",
+  "theory_basis": {
+    "source": "Corporate Earnings Calls and Analyst Beliefs (p.22)",
+    "excerpt": "forecast errors rise monotonically with SUE, with a steep transition around modest negative surprises",
+    "implication": "Management uses contrastive language to mitigate negative surprises; high frequency signals elevated information asymmetry and predicts negative returns."
+  },
+  "extraction_instruction": "Count contrastive connectives (but, however, although, nevertheless, yet, while, despite, in contrast, on the other hand, whereas, though, albeit) per 1k words. Score: >5/k → -2, 3-5/k → -1, 1-3/k → 0, 0.5-1/k → +1, <0.5/k → +2. Important: base on actual occurrences, do NOT default to 0.",
+  "retrieval_query": "contrastive connectives but however although earnings call transcript prepared remarks linguistic hedging",
+  "expected_ic_direction": "-",
+  "condition_scope": { "section_type": ["prepared", "qa"], "speaker_role": ["mgmt"], "sector": null },
+  "top_k": 15,
+  "score_range": [-2, 2]
+}
+```
+</details>
+
+---
+
+### Stage 2 — ExtractionAgent: LLM Batch Scoring
+
+| Parameter | Value |
+|-----------|-------|
+| Vector index | 947,164 chunks (BGE-M3 1024D) |
+| Global Top-K | 3,000 → filtered by condition_scope |
+| Extraction scale | 2,462 episodes, 50/batch × 4 workers, ~9 min |
+
+**Score Distribution (v1)**:
+
+```
+Score = -2.0  ▏  2.3%
+Score = -1.0  ████  22.0%
+Score =  0.0  ████████████████  75.8%  ← ⚠ Zero inflation
+```
+
+> ⚠ Score=0 accounts for 75.8% — the root cause of the G2 failure to come.
+
+---
+
+### Stage 3 — ValidationAgent: Walk-Forward IC
+
+| Metric | Value | Status |
+|--------|-------|--------|
+| IC (Pearson) | **+0.1361** | ✅ Signal strong |
+| \|t-stat\| (NW lags=4) | **2.858** | ✅ Significant |
+| Zero Ratio | **78.6%** | ❌ Extremely high |
+| Direction Consistency | **73%** | ✅ Above 60% |
+
+**Zero Ratio by Sector** (all high, variance < 0.02 → classified as `systemic_sparse`):
+
+| Sector | zr | Sector | zr |
+|--------|----|--------|----|
+| Utilities | 85.2% | Industrials | 76.5% |
+| Real Estate | 84.5% | Healthcare | 74.5% |
+| Consumer Defensive | 80.8% | Comm. Services | 67.1% |
+| Financial Services | 80.5% | Energy | 61.8% |
+| Consumer Cyclical | 79.7% | **Avg** | **78.6%** |
+| Technology | 79.1% | | |
+
+---
+
+### Stage 4 — GovernanceAgent: Hard-Rule Filtering
+
+| Gate | Threshold | Actual | Result |
+|------|-----------|--------|--------|
+| G1 — OOS Coverage | ≥ 5% | 31.4% | ✅ PASS |
+| **G2 — Zero Ratio** | **systemic_sparse → repair** | **78.6%** | ❌ **FAIL** |
+| G3 — \|t-stat\| | ≥ 1.5 | 2.858 | ✅ PASS |
+| G4 — Direction Consistency | ≥ 60% | 73% | ✅ PASS |
+
+> **Verdict: FAIL (G2-only)**. Signal is strong (IC=+0.136, \|t\|=2.86) and only G2 fails — satisfies `_is_salvageable()` standard path → triggers DiagnosisAgent.
+
+---
+
+### Stage 5 — DiagnosisAgent: Root-Cause Analysis + Repair Decision
+
+| Field | Content |
+|-------|---------|
+| **Zero Type** | `systemic_sparse` — cross-sector var<0.02, mean>0.70 → pipeline-level failure |
+| **Salvageable** | ✅ True — IC>0.08, \|t\|>2.0, only_G2 |
+| **Root Cause** | Discretization thresholds too rigid: word-count bins map 1-3/k words to score=0, trapping 75.8% of samples |
+| **Fix** | Replace word-count bins with continuous semantic scoring: assess "contrastive tone" on a spectrum using the full range -2 to +2; reserve 0 only for genuinely balanced text |
+| **Avoid** | Do NOT lower zero_ratio thresholds or impute zeros — the zeros are legitimate (no contrastive words used) |
+
+**Symptom → RAG Search**:
+```
+sparse coverage LLM scoring conservative zero inflation valid signal earnings call
+```
+Retrieved 4 papers for diagnostic context (BGE-M3 similarity search).
+
+---
+
+### Stage 6 — Repair Closed-Loop: v1 → v2 → PASS
+
+| | v1 Extraction Instruction | v2 Extraction Instruction |
+|---|---|---|
+| **Approach** | Count 12 specific connectives, discretize by freq thresholds | Assess overall contrastive tone on a semantic continuum |
+| **Problem** | 1-3/k words → score=0 traps 75.8% | — |
+| **Fix** | — | "Use the full range -2 to +2. Reserve 0 only for genuinely balanced text." |
+| **Status** | ❌ FAIL (G2: zr=78.6%) | ✅ PASS |
+
+**Full-Scale v1 vs v2 Comparison (2,462 episodes)**:
+
+| Metric | v1 (Original) | v2 (Repaired) | Change |
+|--------|--------------|---------------|--------|
+| IC | +0.1361 | +0.1350 | −0.0011 (99.2% retained) |
+| \|t-stat\| | 2.858 | **3.155** | **+10.4%** |
+| Zero Ratio | 78.6% | **44.5%** | **−34.1pp (−43%)** |
+| Direction | 73% | 73% | unchanged |
+| Governance | ❌ FAIL (G2) | ✅ **PASS** | 🎉 |
+
+**Repair Timeline**:
+
+```
+HypothesisAgent → ExtractionAgent → ValidationAgent → GovernanceAgent
+                                                         │ G2 FAIL (zr=78.6%)
+                                                         ▼
+                                              DiagnosisAgent.diagnose()
+                                              ├─ _zero_type() → systemic_sparse
+                                              ├─ _is_salvageable() → True
+                                              └─ _generate_repair_spec() → v2 instruction
+                                                         │
+                                              HypothesisAgent._repair_queue
+                                                         │
+                                              ExtractionAgent v2 (2,462 eps)
+                                                         │
+                                              ValidationAgent + GovernanceAgent
+                                                         │
+                                              ✅ PASS — Repair closed
+```
+
+> **🎉 Repair Closed-Loop Verified!** IC preserved at 99.2%, t-stat improved 10.4%, zero_ratio cut nearly in half. The LLM correctly diagnosed the discretization bottleneck and generated a semantically continuous scoring instruction — without any human intervention.
+
+---
+
 ## Project Structure
 
 ```
