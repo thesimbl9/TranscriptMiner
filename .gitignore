@@ -57,6 +57,9 @@ _test_api_latency.py
 _go.bat
 _run_demo.bat
 _run_harness5.bat
+phase0_indexing.py
+phase0_theory_index.py
+phase0_verify.py
 
 # Agent output ephemera
 agent_output/episodic/
