@@ -62,7 +62,7 @@ FAISS_PATH     = STORE_DIR / "faiss.index"
 META_PATH      = STORE_DIR / "metadata.parquet"
 THEORY_INDEX   = STORE_DIR / "theory_index.faiss"
 THEORY_META    = STORE_DIR / "theory_metadata.parquet"
-MODEL_PATH     = FULLPROJECT / "model"
+MODEL_PATH     = PROJECT / "weights" / "bge-m3"
 
 
 # ═══════════════════════════════════════════════════════════════════════════════════

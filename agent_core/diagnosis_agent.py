@@ -249,16 +249,20 @@ def _call_llm_diagnosis(
 # ── 修复判断 ─────────────────────────────────────────────────────────────────
 
 # 修复准入门槛（DiagnosisAgent 持有，HypothesisAgent 不参与）
-_SALVAGE_IC_MIN  = 0.08
-_SALVAGE_T_MIN   = 2.0
+_SALVAGE_IC_MIN     = 0.08   # 标准路径：强信号
+_SALVAGE_T_MIN      = 2.0
+_SALVAGE_IC_MIN_LO  = 0.03   # 低零值路径：指令有效但信号弱，降低 IC 门槛
+_SALVAGE_T_MIN_LO   = 1.0
+_SALVAGE_ZR_MAX_LO  = 0.30   # 低零值路径准入条件：zero_ratio < 30%
 
 
 def _zero_type(val: dict) -> str:
     """
     判断零值类型：
-      'uniform'     — 各行业零值率方差 < 0.02，说明信号本身覆盖率低（合法零值）
-      'concentrated'— 某行业零值率显著偏高（逃避零值，instruction 对该行业适配差）
-      'unknown'     — zero_by_sector 数据不足，无法判断
+      'uniform'        — 各行业零值率方差 < 0.02 且均值 ≤ 70%，说明信号均匀覆盖（合法零值）
+      'systemic_sparse'— 各行业方差 < 0.02 但均值 > 70%，所有行业一起死 → 管道级失败，应触发修复
+      'concentrated'   — 某行业零值率显著偏高（逃避零值，instruction 对该行业适配差）
+      'unknown'        — zero_by_sector 数据不足，无法判断
     """
     zbs = val.get("zero_by_sector", {})
     if len(zbs) < 3:
@@ -269,6 +273,10 @@ def _zero_type(val: dict) -> str:
     max_z = max(vals)
     min_z = min(vals)
     if var < 0.02:
+        mean_zr = statistics.mean(vals)
+        if mean_zr > 0.70:
+            # 所有行业零值率都极高 → 不是"合法零值"，是管道级失败
+            return "systemic_sparse"
         return "uniform"
     if max_z > 0.80 and min_z < 0.40:
         return "concentrated"
@@ -277,25 +285,60 @@ def _zero_type(val: dict) -> str:
 
 def _is_salvageable(val: dict, gov: dict, explored_names: set[str]) -> bool:
     """
-    判断一个 FAIL 特征是否值得生成修复版。
-    条件：IC > 0.08 且 |t| > 2.0 且 failures 仅含 G2_zero_ratio
-          且 _v2 未探索过 且 零值不是均匀分布型（合法零值不修复）。
+    判断一个 FAIL 特征是否值得生成修复版（两路径）：
+
+    标准路径：IC > 0.08 且 |t| > 2.0 且 failures 仅含 G2_zero_ratio
+              → 强信号 + 高零值 → 修复 scoring 覆盖率
+
+    低零值路径：zero_ratio < 30% 且 IC > 0.03 且 |t| > 1.0
+                → 指令有效（LLM 产生非零分）但信号弱/方向错 → 修复信号质量
+
+    两路径均需 _v2 未探索过，且零值不是均匀分布型（合法零值不修复）。
     """
     if gov.get("coverage_failure"):
         return False
     ic       = abs(val.get("ic", 0.0))
     t        = abs(val.get("t_stat", 0.0))
+    zr       = val.get("zero_ratio", 1.0)
     failures = gov.get("failures", [])
     fn       = gov.get("feature_name", "")
     only_g2  = bool(failures) and all("G2_zero_ratio" in f for f in failures)
     v2_name  = fn + "_v2"
-    if not (ic > _SALVAGE_IC_MIN and t > _SALVAGE_T_MIN and only_g2 and v2_name not in explored_names):
+
+    if v2_name in explored_names:
         return False
-    # 均匀型零值 = 合法零值，不应强制降低，跳过修复
+
+    # 修复深度保护：最多1层修复（v1→v2），禁止 v2→v2_v2 级联
+    # 若当前特征名以 _v2 结尾，说明已是修复版，不再生成二次修复
+    if fn.endswith("_v2"):
+        print(f"[DiagnosisAgent] 特征 '{fn}' 已是修复版，跳过二次修复（max_depth=1）")
+        return False
+
+    # 路径1：标准 — 强信号 + G2（零值率）门控失败
+    standard = (ic > _SALVAGE_IC_MIN and t > _SALVAGE_T_MIN and only_g2)
+
+    # 路径2：低零值 — 指令有效但信号弱，弱 IC/t 门槛
+    coverage_proven = (
+        zr < _SALVAGE_ZR_MAX_LO
+        and ic > _SALVAGE_IC_MIN_LO
+        and t > _SALVAGE_T_MIN_LO
+    )
+
+    if not (standard or coverage_proven):
+        return False
+
+    # 零值类型检查（仅标准路径需要：G2 失败说明 zero_ratio 高，需判断是否可修）
+    # 低零值路径跳过：zr 已经健康（<30%），问题不在零值覆盖而在信号质量
     zt = _zero_type(val)
-    if zt == "uniform":
+    if zt == "uniform" and not coverage_proven:
         print(f"[DiagnosisAgent] 零值类型=均匀分布（合法零值），不生成 repair_spec")
         return False
+    if zt == "systemic_sparse":
+        print(f"[DiagnosisAgent] 零值类型=系统级稀疏（所有行业zr>70%），触发修复")
+    if coverage_proven and not standard:
+        print(f"[DiagnosisAgent] 低零值路径触发修复: zr={zr:.1%} IC={ic:+.4f} t={t:+.3f} "
+              f"(指令有效，信号可修)")
+
     return True
 
 
@@ -342,10 +385,11 @@ def _generate_repair_spec(
 ## 你的任务
 重写 extraction_instruction，使零值率降低到 30% 以下，同时保留原有信号方向。
 要求：
-1. 明确列出每个分值对应的具体词语/句式（不要用模糊描述）
-2. 强调"只要有相关内容就给 ±1，不确定强弱时给 ±1 而非 0"
+1. 用宽泛语义类别描述每个分值（如"表达确定性上调"而非列举词汇），严禁词汇清单匹配
+2. 强调"基于整体语义判断而非查找特定词"，要求 LLM 判断语气/确定性/方向性
 3. 不加"如果没有相关内容则输出0"的说明（减少保守倾向）
 4. 不改变 definition、condition_scope、retrieval_query
+5. 用 "Score must use the full range. Reserve 0 only for genuinely balanced text." 结尾
 
 严格输出以下 JSON（不要有其他文字）：
 {{

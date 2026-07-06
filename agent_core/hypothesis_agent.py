@@ -375,15 +375,22 @@ class HypothesisAgent:
         if self._repair_queue:
             print(f"[HypothesisAgent] 从 history 加载 {len(self._repair_queue)} 个待修复特征")
 
-    def next_feature(self) -> dict:
+    def next_feature(self, episodic_hints: str = "") -> dict:
         """
         返回下一个待测的 feature_spec，优先级：
           1. 种子队列（手写初始假设）
           2. DiagnosisAgent 生成的 repair_spec（_repair_queue，从 history 加载）
           3. Theory-First LLM 生成全新假设
 
+        Args:
+            episodic_hints: EpisodicMemory 检索到的跨会话历史教训，
+                           由 Harness PLANNING handler 注入。
+
         修复决策完全由 DiagnosisAgent 持有，本层只取队列中的 spec。
         """
+        # 存储 episodic_hints 供 _generate_new_feature 使用
+        self._episodic_hints = episodic_hints
+
         if self._seed_queue:
             spec = self._seed_queue.pop(0)
             print(f"[HypothesisAgent] 使用种子特征: {spec['feature_name']}")
@@ -702,6 +709,18 @@ class HypothesisAgent:
         history_digest = self._summarize_history()
         already_tried  = ", ".join(self._explored_names) if self._explored_names else "（无）"
 
+        # Step 3.5: Episodic Memory 跨会话教训（Harness 注入）
+        episodic_block = ""
+        episodic_hints = getattr(self, '_episodic_hints', '')
+        if episodic_hints:
+            episodic_block = f"""
+
+## 跨会话历史教训（Episodic Memory — 来自之前所有运行的经验）
+{episodic_hints}
+
+请务必在生成新特征时避开上述已记录的错误模式。"""
+            print(f"[HypothesisAgent] 注入 EpisodicMemory 提示 ({len(episodic_hints)} chars)")
+
         # Step 4: Theory-First prompt
         prompt = f"""你是一名量化研究员，正在为财报电话会议信号发现系统设计新的特征假设。
 
@@ -714,10 +733,22 @@ class HypothesisAgent:
 ---
 
 ## 历史探索摘要
-{history_digest}
+{history_digest}{episodic_block}
 
 ## 已探索过的特征名称（不要重复）
 {already_tried}
+
+---
+
+## 零值率控制（ANTI-ZERO-INFLATION — 强制遵守）
+
+**连续多轮特征因零值率过高而失败，以下规则为最高优先级：**
+
+1. **禁止默认打0**：extraction_instruction 里绝对不要出现 "如无相关内容则输出0" / "default to 0" / "缺少信号时输出0"。改为要求 LLM 从整体语气和上下文推断置信度，always produce a non-zero judgment。
+2. **禁止词汇清单匹配**：不要列出特定词汇（如 confident/sure/certain）。改用宽泛语义类别描述（如 "表达确定性" / "回避直接回答" / "积极或消极语气"）。
+3. **强制用满分值范围**：extraction_instruction 末尾加："Score must use the full range [-2,2]. Assign +2 for the strongest positive signal, -2 for the strongest negative signal, ±1 for moderate signals. Reserve 0 only for genuinely balanced/neutral text that shows equal evidence in both directions."
+4. **放宽 scope**：condition_scope 的 section_type 优先设为 ["prepared","qa"]（全文本），speaker_role 优先设为 null（不限角色），sector 优先设为 null（不限行业）。窄 scope 是高零值的主要原因。
+5. **语义判断优于规则匹配**：要求 LLM 判断整体语义性质（tone/sentiment/commitment），而非查找特定词。如 "judge the overall confidence level" 而非 "count confident words"。
 
 ---
 
@@ -727,19 +758,17 @@ class HypothesisAgent:
 
 **Step 2**：基于该理论，推导出一个可量化的财报信号特征：
 - definition：该理论预测什么语言行为与股价有关？如何量化为[-2, 2]分？
-- extraction_instruction：告诉打分LLM具体看什么词语/句式，如何判断强弱
+- extraction_instruction：告诉打分LLM具体看什么语义特征，如何判断强/弱/中性
 - retrieval_query：用英文关键词描述这类文本，用于向量检索
 
 **Step 3**：严格对照历史诊断结果调整设计：
-- 诊断[A] Instruction歧义 → 重写extraction_instruction，每个分值对应具体词语/句式；去掉所有"如果没有相关内容则输出0"的说明
+- 诊断[A] Instruction歧义 → 重写extraction_instruction，每个分值对应具体语义特征
 - 诊断[B] 分值粒度失配 → score_range改为[-1,1]，instruction中区分强/弱判断标准
 - 诊断[C] 信号无效 → 必须换理论方向，不要在同类语言特征上继续尝试
 - 诊断[D] 行业方向不一致 → sector字段限定单一行业，或重新设计行业中性标准
 - 诊断[E] 时序不稳定 → 放宽condition_scope，或years限定2018+
 - 诊断[F] 跨section差值 → 把特征拆成两个单独信号（各自打分），而非要求LLM计算差值
 - 诊断[G] 外部数据依赖 → 特征只能依赖transcript内部可观测信号；不要用"相对预期""相对上季度"等transcript里没有的参照
-- 高零值年份 → extraction_instruction末尾加一句："如片段中无明确相关内容，输出0；不要跳过或返回null"
-- 【重要原则】不要在instruction里加anchor cases（"0=显式重申"）或边界说明，这会导致LLM默认逃到0（evasiveness从4%升至57%的教训）
 
 请严格输出以下JSON格式（不要有任何其他文字）：
 {{
@@ -750,7 +779,7 @@ class HypothesisAgent:
     "excerpt": "论文中的关键原句（英文原文，≤80字）",
     "implication": "该理论推导出的预测方向及原因（中文，1句）"
   }},
-  "extraction_instruction": "提取指引（中文，3-5句：先说看什么，再说怎么打分，列出正负分对应的具体语言特征）",
+  "extraction_instruction": "提取指引（中文，3-5句：先说看什么语义特征，再说怎么打满[-2,2]全范围，区分强/弱/中性信号）",
   "retrieval_query": "English phrase for semantic vector search (5-10 keywords)",
   "expected_ic_direction": "+" or "-",
   "condition_scope": {{

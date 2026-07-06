@@ -5,6 +5,7 @@ __pycache__/
 dist/
 build/
 .eggs/
+.pytest_cache/
 
 # Virtual environments
 venv/
@@ -15,40 +16,52 @@ env/
 .env
 设计日志.md
 
-# Papers (large PDFs, users download via phase0_pipeline/papers/README.txt)
+# Papers (large PDFs, users download separately — see phase0_pipeline/papers/README.md)
 papers/
 
-# Legacy phase0 scripts (local use only, superseded by phase0_pipeline/)
-phase0_indexing.py
-phase0_theory_index.py
-phase0_verify.py
-
-# Model weights (users download BGE-M3 via phase0_pipeline/model/README.txt)
+# Model weights (users download BGE-M3 separately — see phase0_pipeline/model/README.md)
 model/*
 !model/.gitkeep
-!model/README.txt
+!model/README.md
 
-# Vector store (large binary files, ~3.9GB)
+# Vector store (large binary files, ~3.9GB — build via phase0_pipeline/)
 vector_store/faiss.index
 vector_store/theory_index.faiss
 vector_store/metadata.parquet
 vector_store/theory_metadata.parquet
 
-# Agent output (generated CSVs, logs)
+# Agent output (generated CSVs, reports, logs — too large to commit)
 agent_output/*.csv
 agent_output/*.json
 agent_output/*.txt
 agent_output/debug/
 
-#   Exempt: 3 PASS feature examples (formula + extracted data)
+#   Exempt: 4 example features for demo (formula + extracted data)
 !agent_output/qa_spontaneity.csv
 !agent_output/report_qa_spontaneity.json
 !agent_output/mgmt_tone_confidence.csv
 !agent_output/report_mgmt_tone_confidence.json
 !agent_output/guidance_revision_direction.csv
 !agent_output/report_guidance_revision_direction.json
+!agent_output/contrastive_connectives.csv
+!agent_output/report_contrastive_connectives.json
 
+# Logs
 logs/
+
+# Local dev scripts (not for distribution)
+_launcher.py
+_run5.py
+_test_api.py
+_test_api_latency.py
+_go.bat
+_run_demo.bat
+_run_harness5.bat
+
+# Agent output ephemera
+agent_output/episodic/
+agent_output/*.jsonl
+agent_output/_go_*.txt
 
 # IDE
 .vscode/

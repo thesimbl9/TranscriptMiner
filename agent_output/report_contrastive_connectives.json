@@ -1,0 +1,195 @@
+{
+  "iteration": 4,
+  "feature_spec": {
+    "feature_name": "contrastive_connectives",
+    "definition": "管理层在电话会议中使用转折性连接词（如but, however, although等）的频率，高频转折词可能暗示管理层试图平衡负面信息，增加信息不对称，从而预测未来回报负向。",
+    "theory_basis": {
+      "source": "Corporate Earnings Calls and Analyst Beliefs (p.22)",
+      "excerpt": "The patterns reveal familiar asymmetries in analysts’ reactions: (a) forecast errors rise monotonically with SUE, with a steep transition around modest negative surprises and saturation in the tails",
+      "implication": "分析师对负面惊喜反应更强烈，管理层可能通过转折性语言来缓和这种不对称，高频转折词预示信息不对称加大，未来回报可能为负。"
+    },
+    "extraction_instruction": "统计给定文本中转折性连接词（包括but, however, although, nevertheless, yet, while, despite, in contrast, on the other hand, whereas, though, albeit）的出现次数，除以总词数得到每千词频率。根据频率打分：非常频繁（>5/1000词）得-2，频繁（3-5/1000词）得-1，中等（1-3/1000词）得0，较少（0.5-1/1000词）得+1，几乎没有（<0.5/1000词）得+2。注意：必须基于实际出现次数，不要因模糊表述而默认输出0。",
+    "retrieval_query": "contrastive connectives but however although earnings call transcript prepared remarks linguistic hedging",
+    "expected_ic_direction": "-",
+    "condition_scope": {
+      "section_type": [
+        "prepared",
+        "qa"
+      ],
+      "speaker_role": [
+        "mgmt"
+      ],
+      "sector": null
+    },
+    "top_k": 15,
+    "score_range": [
+      -2,
+      2
+    ],
+    "_theory_cluster": "information_asymmetry",
+    "_theory_rag_refs": [
+      {
+        "paper": "Capturing dynamics of post-earnings-announcement drift using genetic algorithm-optimised supervised learning",
+        "page": 3,
+        "score": 0.6673
+      },
+      {
+        "paper": "Extracting the Structure of Press Releases for Predicting Earnings Announcement Returns",
+        "page": 1,
+        "score": 0.6465
+      },
+      {
+        "paper": "Extracting the Structure of Press Releases for Predicting Earnings Announcement Returns",
+        "page": 5,
+        "score": 0.6243
+      },
+      {
+        "paper": "Capturing dynamics of post-earnings-announcement drift using genetic algorithm-optimised supervised learning",
+        "page": 2,
+        "score": 0.6242
+      },
+      {
+        "paper": "Text analysis in financial disclosures",
+        "page": 13,
+        "score": 0.6071
+      },
+      {
+        "paper": "Corporate Earnings Calls and Analyst Beliefs",
+        "page": 22,
+        "score": 0.602
+      },
+      {
+        "paper": "Text analysis in financial disclosures",
+        "page": 22,
+        "score": 0.5961
+      },
+      {
+        "paper": "Corporate Earnings Calls and Analyst Beliefs",
+        "page": 42,
+        "score": 0.5884
+      }
+    ]
+  },
+  "val_result": {
+    "feature_name": "contrastive_connectives",
+    "ic": 0.1361,
+    "t_stat": 2.858,
+    "n_quarters": 12,
+    "zero_ratio": 0.786,
+    "per_sector_ic": {
+      "Basic Materials": 0.4081,
+      "Communication Services": -0.1276,
+      "Consumer Cyclical": 0.1146,
+      "Consumer Defensive": 0.1578,
+      "Energy": 0.0395,
+      "Financial Services": 0.189,
+      "Healthcare": 0.3108,
+      "Industrials": 0.1975,
+      "Real Estate": -0.0875,
+      "Technology": 0.2046,
+      "Utilities": -0.0322
+    },
+    "direction_consistency": 0.727,
+    "score_dist": {
+      "-2.0": 0.023,
+      "-1.0": 0.22,
+      "0.0": 0.758
+    },
+    "zero_by_sector": {
+      "Basic Materials": 0.775,
+      "Communication Services": 0.671,
+      "Consumer Cyclical": 0.797,
+      "Consumer Defensive": 0.808,
+      "Energy": 0.618,
+      "Financial Services": 0.805,
+      "Healthcare": 0.745,
+      "Industrials": 0.765,
+      "Real Estate": 0.845,
+      "Technology": 0.791,
+      "Utilities": 0.852
+    },
+    "zero_by_year": {
+      "2015": 0.75,
+      "2016": 0.869,
+      "2017": 0.825,
+      "2018": 0.769,
+      "2019": 0.783,
+      "2020": 0.766,
+      "2021": 0.784,
+      "2022": 0.752,
+      "2023": 0.785
+    }
+  },
+  "gov_result": {
+    "feature_name": "contrastive_connectives",
+    "passed": false,
+    "failures": [
+      "G2_zero_ratio: 78.6% >= 70% (zero_type=uniform)"
+    ],
+    "feedback": "特征 'contrastive_connectives' 未通过治理检查（1 项失败）：\n  - G2_zero_ratio: 78.6% >= 70% (zero_type=uniform)",
+    "ic": 0.1361,
+    "t_stat": 2.858,
+    "zero_ratio": 0.786,
+    "direction_consistency": 0.727,
+    "score_dist": {
+      "-2.0": 0.023,
+      "-1.0": 0.22,
+      "0.0": 0.758
+    },
+    "zero_by_sector": {
+      "Basic Materials": 0.775,
+      "Communication Services": 0.671,
+      "Consumer Cyclical": 0.797,
+      "Consumer Defensive": 0.808,
+      "Energy": 0.618,
+      "Financial Services": 0.805,
+      "Healthcare": 0.745,
+      "Industrials": 0.765,
+      "Real Estate": 0.845,
+      "Technology": 0.791,
+      "Utilities": 0.852
+    },
+    "zero_by_year": {
+      "2015": 0.75,
+      "2016": 0.869,
+      "2017": 0.825,
+      "2018": 0.769,
+      "2019": 0.783,
+      "2020": 0.766,
+      "2021": 0.784,
+      "2022": 0.752,
+      "2023": 0.785
+    },
+    "diagnosis": {
+      "root_cause": "特征信号覆盖率低（零值率78.6%），且各行业零值率差异小，属于合法零值（管理层确实未使用转折连接词），导致信号稀疏、预测能力被大量零值稀释，IC虽显著但实际应用受限。",
+      "fix": "建议将特征定义从“转折连接词频率”改为“转折连接词与正面/负面情感词的交互频率”，例如统计“but + 负面词”或“however + 正面词”的共现频率，以捕捉管理层刻意平衡信息的意图，提高信号区分度。同时，放宽condition_scope中的section_type，仅保留“qa”部分（问答环节更易出现转折性解释），减少prepared部分中低信息密度的零值。",
+      "avoid": "不要直接降低零值率阈值或对零值样本进行插值填充，这会引入噪声并破坏合法零值的真实语义。",
+      "rag_refs": [
+        {
+          "paper": "From Hypotheses to Factors Constrained LLM Agents in Cryptocurrency Markets",
+          "page": 7,
+          "score": 0.5792
+        },
+        {
+          "paper": "From Text to Alpha Can LLMs Track Evolving Signals in Corporate Disclosures",
+          "page": 6,
+          "score": 0.54
+        },
+        {
+          "paper": "Same Company Same Signal The Role of Identity in Earnings Call Transcripts",
+          "page": 9,
+          "score": 0.5378
+        },
+        {
+          "paper": "SAE-FiRE Enhancing Earnings Surprise Predictions Through Sparse Autoencoder Feature Selection",
+          "page": 8,
+          "score": 0.5348
+        }
+      ],
+      "queries_used": [
+        "sparse coverage LLM scoring conservative zero inflation valid signal earnings call"
+      ]
+    }
+  },
+  "level": "L3_full"
+}

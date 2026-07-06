@@ -59,9 +59,9 @@ _gpu_vecs   = None   # (947164, 1024) float16 tensor on GPU
 _client     = None   # OpenAI client 单例，全程复用同一连接池
 
 
-def _get_client(api_key: str | None = None) -> OpenAI:
+def _get_client(api_key: str | None = None, force_new: bool = False) -> OpenAI:
     global _client
-    if _client is None:
+    if force_new or _client is None:
         key = api_key or _API_KEY
         if not key:
             raise RuntimeError(f"API key not set in {FULLPROJECT / '.env'}")
@@ -337,7 +337,7 @@ def extract_feature_global(
     sample_n: int | None = None,
     sample_seed: int = 42,
     batch_size: int = 50,
-    max_workers: int = 50,
+    max_workers: int = 4,
     debug_n: int = 3,
 ) -> pd.DataFrame:
     """
@@ -354,7 +354,7 @@ def extract_feature_global(
     condition_scope = feature_spec.get("condition_scope", {})
     retrieval_query = feature_spec["retrieval_query"]
 
-    _get_client(api_key)  # 初始化单例 client
+    _get_client(api_key, force_new=True)  # 每次提取重建 client，避免跨迭代连接池耗尽
 
     print(f"[ExtractionAgent] 全局检索模式: {feature_name}")
     print(f"[ExtractionAgent] query: {retrieval_query}  global_top_k={global_top_k}")
@@ -443,19 +443,34 @@ def extract_feature_global(
         scores = score_batch_episodes(feature_spec, items, api_key=api_key, _debug_sink=sink)
         return b_start, items, scores
 
+    # 单batch超时：batch_size越大API越慢，按100eps=120s线性外推，上限600s
+    _batch_timeout = max(120, min(600, int(batch_size * 1.2)))
     with ThreadPoolExecutor(max_workers=max_workers) as pool:
         futs = {pool.submit(_score_batch, b_start, items): b_start
                 for b_start, items in batches}
+        failed_batches = 0
         for fut in as_completed(futs):
-            b_start, items, scores = fut.result()
+            b_start = futs[fut]
+            n_in_batch = min(batch_size, n_episodes - b_start)
+            try:
+                b_start, items, scores = fut.result(timeout=_batch_timeout)
+            except Exception as e:
+                failed_batches += 1
+                print(f"  [WARN] batch b_start={b_start} ({n_in_batch} eps) 异常: {e}", flush=True)
+                # 将该 batch 的所有 episode 标记为 None
+                for offset in range(n_in_batch):
+                    results_map.setdefault(b_start + offset, None)
+                continue
             for offset, ((sym, date), val) in enumerate(zip(
                 episodes[b_start : b_start + len(items)], scores
             )):
                 results_map[b_start + offset] = val
             completed += len(items)
-            if completed % (batch_size * 5) == 0 or completed == n_episodes:
-                filled = sum(1 for v in results_map.values() if v is not None)
-                print(f"  [进度] {completed}/{n_episodes} episodes  filled={filled}", flush=True)
+            filled = sum(1 for v in results_map.values() if v is not None)
+            batch_idx = b_start // batch_size + 1
+            print(f"  [batch {batch_idx}/{n_batches}] {completed}/{n_episodes} eps  filled={filled}  b_start={b_start}", flush=True)
+        if failed_batches:
+            print(f"  [WARN] {failed_batches}/{n_batches} batches 因异常失败，对应 episode 标记为 None", flush=True)
 
     # ── Step 6: 写调试文件 ────────────────────────────────────────────────────
     if debug_n > 0 and any(debug_sinks.values()):

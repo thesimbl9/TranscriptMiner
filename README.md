@@ -1,81 +1,101 @@
 # EarningsSignal Agent — LLM-Driven Alpha Factor Discovery Pipeline
 
-An autonomous multi-agent system for discovering and iteratively refining predictive signals from earnings call transcripts, targeting AI Agent engineer roles at quantitative hedge funds.
+An autonomous multi-agent system for discovering and iteratively refining predictive signals from earnings call transcripts. Built for AI Agent engineer roles at quantitative hedge funds.
 
-## Overview
+## What Makes This Different
 
-What distinguishes this project from conventional LLM factor mining:
-
-| Standard Approach | This Project |
+| Conventional LLM Factor Mining | This Project |
 |---|---|
-| LLM freely generates factors | **RAG + 6 theoretical clusters constrain the hypothesis space** |
-| No quality governance | **Explicit multi-metric governance: IC / t-stat / zero_ratio / direction_consistency** |
-| Trial-and-error iteration | **DiagnosisAgent performs root-cause analysis and generates targeted repair specs** |
-| Black-box factor production | **Every decision trace recorded in feature_history.jsonl** |
+| LLM freely generates factors | **RAG-constrained hypothesis space (6 theoretical clusters × 20 papers)** |
+| No quality governance | **Multi-metric hard-rule gates: IC / |t| / zero_ratio / direction_consistency** |
+| Trial-and-error without learning | **DiagnosisAgent performs root-cause analysis + generates targeted repair specs** |
+| No repair mechanism | **Autonomous closed-loop repair: FAIL → diagnose → fix → re-extract → PASS** |
+| Black-box factor production | **Every decision trace recorded in feature_history.jsonl (append-only audit trail)** |
 
 ## Architecture
 
 ```
-Phase 0 (One-time)               Phase 1 (Agent Loop)
-─────────────────────────────────────────────────────────
-                                 ┌──────────────────┐
-   Papers (20 PDFs) ──▶ RAG index│  HypothesisAgent  │←── repair_spec
-                                 │  theory→hypothesis│    (from Diagnosis)
-                                 └────────┬─────────┘
-                                          │ feature_spec (JSON)
-                                 ┌────────▼─────────┐
-   Transcript batches ──▶ chunk │  ExtractionAgent  │
-   retrieval (GPU matmul)       │  LLM batch scoring │
-                                 └────────┬─────────┘
-                                          │ feature_df (CSV)
-                                 ┌────────▼─────────┐
-   sp500_events.parquet ──▶ merge│ ValidationAgent   │
-                                 │  IC · t-stat · NW │
-                                 └────────┬─────────┘
-                                          │ val_result (dict)
-                                 ┌────────▼─────────┐
-                                 │ GovernanceAgent    │
-                                 │  G1–G4 hard rules  │
-                                 └───┬──────────┬────┘
-                               PASS  │          │ FAIL
-                                     │   ┌──────▼──────────┐
-                                     │   │  DiagnosisAgent   │
-                                     │   │  RAG query → LLM  │
-                                     │   │  root_cause + fix │
-                                     │   └──────┬───────────┘
-                                     │          │ _repair_spec
-                                     │   ┌──────▼───────────┐
-                                     │   │  Back to          │
-                                     │   │  HypothesisAgent  │
-                                     │   └──────────────────┘
-                              ┌──────▼──────┐
-                              │  fusion_eval │
-                              │  multi-factor│
-                              └──────────────┘
+Phase 0 (One-time)                    Phase 1 (Agent Loop)
+────────────────────────────────────────────────────────────────
+                                      ┌──────────────────┐
+   Papers (20 PDFs) ──▶ RAG index    │  HypothesisAgent  │◀── repair_spec
+                                      │  theory→hypothesis│    (from Diagnosis)
+                                      └────────┬─────────┘
+                                               │ feature_spec (JSON)
+                                      ┌────────▼─────────┐
+   Transcript batches ──▶ chunk      │  ExtractionAgent   │
+   retrieval (GPU matmul, 947K)      │  LLM batch scoring  │
+                                      └────────┬─────────┘
+                                               │ feature_df (CSV)
+                                      ┌────────▼─────────┐
+   sp500_events.parquet ──▶ merge    │  ValidationAgent   │
+                                      │  IC · t-stat · NW  │
+                                      └────────┬─────────┘
+                                               │ val_result
+                                      ┌────────▼─────────┐
+                                      │ GovernanceAgent    │
+                                      │  G1–G4 hard rules  │
+                                      └───┬──────────┬────┘
+                                    PASS  │          │ FAIL
+                                          │   ┌──────▼──────────┐
+                                          │   │  DiagnosisAgent   │
+                                          │   │  symptom→RAG→LLM  │
+                                          │   │  root_cause + fix │
+                                          │   └──────┬───────────┘
+                                          │          │ _repair_spec
+                                          │   ┌──────▼───────────┐
+                                          │   │  HypothesisAgent  │
+                                          │   │  _repair_queue    │
+                                          │   └──────┬───────────┘
+                                          │          │ v2 feature
+                                          │   ┌──────▼───────────┐
+                                          │   │  Extract→Validate │
+                                          │   │  →Govern→PASS    │
+                                          │   └──────────────────┘
+                                   ┌──────▼──────┐
+                                   │  fusion_eval │
+                                   │  multi-factor│
+                                   └──────────────┘
 ```
 
 ## Key Innovations
 
-### 1. RAG-Constrained Hypothesis Generation
-HypothesisAgent retrieves relevant theory from 20 academic papers (indexed via BGE-M3 embeddings) across 6 domain-specific clusters: tone_sentiment, information_asymmetry, forward_guidance, qa_subjectivity, managerial_behavior, alpha_discovery. The LLM reads the theory FIRST, then derives a feature specification — not the other way around.
+### 1. Theory-First Hypothesis Generation
+HypothesisAgent retrieves from 20 academic papers (BGE-M3 embeddings) across 6 theoretical clusters: `tone_sentiment`, `information_asymmetry`, `forward_guidance`, `qa_subjectivity`, `managerial_behavior`, `alpha_discovery`. The LLM reads theory FIRST, then derives a feature spec — never the reverse.
 
-### 2. Explicit Multi-Metric Governance
-GovernanceAgent enforces four hard rules, each with a clear PASS/FAIL rationale:
-- **G1**: IC magnitude (>|0.015|)
-- **G2**: zero_ratio (uniform ≤0.70, concentrated ≤0.45) — with automated zero-type classification
-- **G3**: |t-stat| ≥ 1.5
+### 2. Multi-Metric Governance with Zero-Type Classification
+GovernanceAgent enforces hard rules with adaptive thresholds:
+- **G1**: OOS coverage ≥ 5%
+- **G2**: zero_ratio — `uniform ≤ 70%` (legal zeros), `systemic_sparse` (triggers repair), `concentrated ≤ 45%` (evasive zeros)
+- **G3**: |t-stat| ≥ 1.5 (NW lags=4)
 - **G4**: direction_consistency ≥ 60%
 
-Every rule is human-auditable. No black-box quality scores.
-
-### 3. Autonomous Diagnosis & Repair Loop
-When a feature fails governance, DiagnosisAgent:
-1. Maps failure symptoms to retrieval queries (no free-form LLM hallucination)
-2. Searches the theory index for relevant evidence
+### 3. Autonomous Diagnosis & Repair Closed-Loop
+When a feature fails with strong signal but high zero_ratio (G2-only), DiagnosisAgent:
+1. Maps failure symptoms → RAG queries (rule-based, no LLM hallucination)
+2. Searches theory index for relevant evidence
 3. Produces structured diagnosis: `{root_cause, fix, avoid, rag_refs}`
-4. If the feature meets salvage criteria (IC>0.08, |t|>2.0, only G2 failure), generates a repair spec that feeds back to HypothesisAgent
+4. Salvage check: IC > 0.08, |t| > 2.0, only_G2 → generates repair spec (v2 extraction_instruction)
+5. HypothesisAgent prioritizes repair specs in `_repair_queue` over new generation
+6. v2 feature is re-extracted and re-validated at full scale
 
-**Real example**: `guidance_revision_direction` v1 → DiagnosisAgent identified "extraction threshold too strict for small-magnitude adjustments" → v2 expanded examples → v3 relaxed condition_scope. Three generations with extraction instruction growing from 159 to 636 characters, each failure driving a targeted fix.
+**Verified repair closed-loop** (`contrastive_connectives`, 2,462 episodes):
+
+| Metric | v1 (original) | v2 (repaired) | Change |
+|--------|--------------|---------------|--------|
+| IC | +0.1361 | +0.1350 | −0.0011 (99.2% retained) |
+| \|t-stat\| | 2.858 | 3.155 | **+10.4%** |
+| zero_ratio | 78.6% | 44.5% | **−34.1pp (−43%)** |
+| direction | 73% | 73% | unchanged |
+| Governance | FAIL (G2) | **PASS** | |
+
+The LLM diagnosed "discretization thresholds too rigid" and generated a v2 instruction using continuous semantic scoring instead of word-count bins — preserving signal while drastically reducing zeros.
+
+### 4. Full Pipeline Traceability
+- `feature_history.jsonl`: append-only audit trail of all 55 explored features
+- `agent_output/trace_*.json`: structured per-step trace (73 steps, 92% tool success rate)
+- `agent_output/loop_checkpoint.json`: FSM checkpoint for crash recovery
+- `viz_demo/agent_pipeline_demo.html`: self-contained HTML visualization of the complete pipeline
 
 ## Quick Start
 
@@ -84,98 +104,116 @@ When a feature fails governance, DiagnosisAgent:
 pip install -r requirements.txt
 
 # 2. Configure API key
-echo "SILICONFLOW_API_KEY=your_key_here" > .env
+cp .env.example .env
+# Edit .env and add your SiliconFlow API key
 
-# 3. Run Phase 0 (one-time, builds FAISS indices from transcripts and papers)
-#    See phase0_pipeline/README.md for detailed instructions
+# 3. Build FAISS indices (one-time, see phase0_pipeline/README.md)
 cd phase0_pipeline
 pip install -r requirements.txt
-python build_transcript_index.py      # transcript chunk index (~95万 embeddings, ~3.9GB)
-python build_theory_index.py          # theory paper index (20 papers)
+python build_transcript_index.py    # ~947K chunks, ~3.9GB
+python build_theory_index.py         # 20 papers
 
 # 4. Run the Agent loop
 cd ..
 python run_agent.py --max-iter 20
-# Output: agent_output/{feature_name}.csv, feature_history.jsonl
 
-# 5. Evaluate fusion performance
+# 5. Evaluate multi-factor fusion
 python fusion_eval.py
-# Output: agent_output/fusion_eval_results.csv
+
+# 6. Visualize pipeline (no GPU needed)
+python viz_demo/build_demo.py
+# Open viz_demo/agent_pipeline_demo.html in browser
 ```
 
-## Evaluation Results (S&P 500, 2021–2023 test period, industry-neutralized)
+## Exploration Results (S&P 500, 55 features explored)
 
-### Yearly IC Breakdown — Text Features Complement Financials
+### Top Discovered Features
 
-M0 (BASE13) is already a strong baseline built from 13 financial + momentum factors. Text features don't uniformly boost IC — they provide **orthogonal information when financial ratios are least reliable**:
+| Feature | IC | |t-stat| | zero_ratio | PASS | Notes |
+|---------|-----|---------|------------|------|-------|
+| qa_spontaneity | +0.1656 | 4.983 | 30.6% | ✅ | Q&A spontaneity vs prepared remarks |
+| moderate_positive_tone | +0.1523 | 3.742 | 44.4% | ✅ | Non-extreme positive emotion ratio |
+| contrastive_connectives | +0.1361 | 2.858 | 78.6% | ❌→✅ | **Repaired**: v2 zr=44.5%, PASS |
+| managerial_certainty_tone | +0.1028 | 2.856 | 62.4% | ❌ | G2-only, salvageable candidate |
+| mgmt_tone_confidence | +0.0727 | 2.637 | 3.8% | ✅ | Strong signal, almost zero zero_ratio |
 
-| Period | M0 (BASE13) | + Text (7 selected) | Δ | Regime |
-| ------ | ----------- | ------------------- | --- | ------ |
-| **2020 (val)** | +0.0673 | **+0.0828** | **+0.0155 (+23%)** | COVID: financials distorted, text captures uncertainty |
-| 2021 (test) | **+0.0376** | +0.0313 | −0.0063 | Recovery: strong earnings rebound favors financials |
-| 2022 (test) | +0.1911 | **+0.2009** | +0.0098 | Bear market: text captures management tone shift |
-| 2023 (test) | +0.0840 | **+0.1007** | +0.0167 | AI rally: text detects narrative divergence |
+### Fusion Performance (BASE13 financial + 7 text features)
 
-### Residual IC Proof — Information Orthogonal to Financials
+| Period | M0 (BASE13) | + Text | Δ | Regime |
+|--------|-------------|--------|---|--------|
+| 2020 (val) | +0.0673 | **+0.0828** | **+23%** | COVID: text captures uncertainty |
+| 2022 (test) | +0.1911 | **+0.2009** | +5.1% | Bear market: tone shift signal |
+| 2023 (test) | +0.0840 | **+0.1007** | +19.9% | AI rally: narrative divergence |
 
-To verify text features are not repackaging financial information, we compute the **residual IC**: each text feature's correlation with `move_post − M0_pred` (the part of future returns unexplained by BASE13).
-
-Forward-looking text features show strong residual signal:
-
-- `forward_numeric_specificity`: residual IC = **+0.108** (3× the average BASE13 factor marginal IC)
-- `qa_spontaneity`: residual IC = **+0.043** (captures Q&A session dynamics absent from financial statements)
-- `guidance_revision_direction` (v3): residual IC = **+0.033** (iterative repair improved from v1 baseline of +0.007)
-
-These residual ICs confirm that earnings call transcripts contain **alpha information structurally absent from financial statements** — management tone, forward guidance framing, and Q&A spontaneity that accounting ratios cannot capture.
-
-### Risk Diversification
-
-Even when average IC is comparable, text features improve portfolio stability:
-
-| Metric | M0 (BASE13) | + Text (13 features) | Improvement |
-| ------ | ----------- | -------------------- | ----------- |
+| Risk Metric | M0 (BASE13) | + Text | Improvement |
+|-------------|-------------|--------|-------------|
 | Long-Short IR | 2.484 | **2.733** | **+10.0%** |
 | Max Drawdown | −1.37% | **−0.49%** | **−64%** |
-| NW t-stat | 5.075 | **5.674** | **+11.8%** |
 
-Text features act as a **diversifying information source** — their prediction errors are less correlated with financial-factor errors, reducing peak-to-trough drawdowns. The same IC with lower volatility and lower drawdown is a genuine improvement in risk-adjusted performance.
+### Residual IC — Orthogonal to Financial Features
 
-## Limitations & Future Work
-
-- **Single transcript source**: Framework currently tested on earnings calls only; migration to analyst reports, 10-K filings, and FOMC minutes is architecturally supported but not yet executed
-- **Coverage dependency**: ~69% of S&P 500 episodes have transcript data; uncovered samples rely on BASE13 financial features
-- **LLM API cost**: ~10M tokens per extraction run (DeepSeek V4 Flash, ~$0.14/1M input tokens)
-- **Pool size**: 337 stocks (constrained by S&P 500 index membership and ex991 transcript availability)
+- `forward_numeric_specificity`: residual IC = **+0.108** (3× avg BASE13 marginal IC)
+- `qa_spontaneity`: residual IC = **+0.043**
+- `guidance_revision_direction` (v3): residual IC = **+0.033**
 
 ## Project Structure
 
 ```
 Fullproject/
-├── agent_core/                    # Five-layer agent pipeline
-│   ├── config.py                  # Shared paths, API keys, constants
-│   ├── hypothesis_agent.py        # RAG-driven feature hypothesis generation
-│   ├── extraction_agent.py        # LLM batch scoring (DeepSeek, GPU retrieval)
-│   ├── validation_agent.py        # IC / t-stat evaluation (LightGBM walk-forward)
-│   ├── governance_agent.py        # Hard-rule PASS/FAIL filtering
-│   ├── diagnosis_agent.py         # Root-cause analysis & repair spec generation
-│   └── feature_history.jsonl      # Append-only audit trail (160 KB)
-├── phase0_pipeline/               # Generic FAISS index builder (self-contained)
-│   ├── build_transcript_index.py  # Earnings call transcripts → FAISS
-│   ├── build_theory_index.py      # Academic papers → FAISS
-│   └── requirements.txt
-├── run_agent.py                   # Main loop orchestration
-├── fusion_eval.py                 # Multi-factor fusion evaluation vs M0 baseline
-├── demo_agent_visualization.ipynb # Interactive pipeline replay (no GPU needed)
+├── agent_core/                     # Five-layer agent pipeline
+│   ├── config.py                   # Shared paths, API keys, constants
+│   ├── hypothesis_agent.py         # Theory-First RAG hypothesis generation
+│   ├── extraction_agent.py         # GPU retrieval + LLM batch scoring
+│   ├── validation_agent.py         # LightGBM walk-forward IC evaluation
+│   ├── governance_agent.py         # Hard-rule PASS/FAIL filtering
+│   ├── diagnosis_agent.py          # Root-cause analysis + repair spec generation
+│   └── feature_history.jsonl       # Append-only audit trail (55 features)
+├── harness/                        # Agent runtime framework
+│   ├── loop.py                     # 9-state FSM engine + checkpoint/resume
+│   ├── guardrail.py                # Pluggable 5-gate pipeline
+│   ├── adapters.py                 # Handler factories (7 states)
+│   ├── tools.py                    # ToolRegistry (timeout/retry/fallback)
+│   ├── context.py                  # ContextConstructor (3-level assembly)
+│   ├── tracer.py                   # Structured trace + replay
+│   └── memory/
+│       └── episodic.py             # Cross-session BGE-M3 episodic memory
+├── phase0_pipeline/                # FAISS index builder (self-contained)
+│   ├── build_transcript_index.py
+│   ├── build_theory_index.py
+│   └── README.md
+├── viz_demo/                       # Pipeline visualization
+│   ├── build_demo.py               # HTML generator from history data
+│   └── agent_pipeline_demo.html    # Self-contained 6-stage demo
+├── tests/
+│   └── test_harness.py             # Harness component tests
+├── run_agent.py                    # Main loop (5-layer orchestration)
+├── run_harness.py                  # Harness-based loop (FSM engine)
+├── fusion_eval.py                  # Multi-factor fusion vs M0 baseline
+├── demo_repair_closed_loop.py      # Closed-loop repair analysis tool
+├── live_repair_test.py             # End-to-end repair live test
+├── fullscale_repair_test.py        # Full-scale v1 vs v2 validation
 ├── data/
-│   └── sp500_events.parquet       # S&P 500 earnings event metadata (1.5 MB)
-├── agent_output/                  # 3 example features (CSV + report JSON)
-├── vector_store/                  # FAISS indices (build via phase0_pipeline)
-├── model/                         # BGE-M3 weights (download separately)
-└── requirements.txt               # Python dependencies
+│   └── sp500_events.parquet        # Earnings event metadata (1.5 MB)
+├── agent_output/                   # 4 example features (CSV + report)
+├── vector_store/                   # FAISS indices (build via phase0_pipeline)
+├── model/                          # BGE-M3 weights (download separately)
+├── 设计日志.md                      # Design decision log (Chinese)
+├── .env.example                    # Environment template
+├── requirements.txt
+└── README.md
 ```
+
+## Limitations
+
+- **Coverage**: ~69% of S&P 500 episodes have transcript data; uncovered samples rely on BASE13 financial features
+- **LLM API cost**: ~10M tokens per full extraction run (DeepSeek V4 Flash, ~$0.14/1M input tokens)
+- **Repair depth**: Limited to 1 level (v1→v2) to prevent infinite cascade
+- **Coverage bottleneck**: 80% of FAILs are G1_coverage (retrieval scope), not signal quality — identified as next optimization target
 
 ## References
 
-- MASTER: *Multimodal Alpha Research* (AAAI 2024) — market-adaptive multimodal stock selection
-- *From Text to Alpha: Can LLMs Track Evolving Signals in Corporate Disclosures* — LLM-based text signal extraction
-- BGE-M3: *Multi-Lingual, Multi-Granularity Text Embedding* — embedding model used in RAG pipeline
+- *MASTER: Market-Adaptive Multimodal Stock Selection* (AAAI 2024)
+- *From Text to Alpha: Can LLMs Track Evolving Signals in Corporate Disclosures*
+- *CogAlpha: Cognitive Alpha Mining via LLM-Driven Code-Based Evolution* (arXiv 2511.18850)
+- *AlphaAgent: LLM-Driven Alpha Mining with Regularized Exploration* (SIGKDD 2025)
+- BGE-M3: *Multi-Lingual, Multi-Granularity Text Embedding*

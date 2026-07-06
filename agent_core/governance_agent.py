@@ -25,9 +25,10 @@ DIRECTION_CONS_MIN          = 0.60
 def _zero_type(validation_result: dict) -> str:
     """
     判断零值分布类型（与 DiagnosisAgent._zero_type 保持一致）：
-      'uniform'      — 各行业零值率方差 < 0.02，合法零值（管理层确实未提及）
-      'concentrated' — 某行业零值率显著偏高，逃避零值（instruction 对该行业适配差）
-      'unknown'      — zero_by_sector 数据不足
+      'uniform'         — 各行业零值率方差 < 0.02 且均值 ≤ 70%，合法零值（管理层确实未提及）
+      'systemic_sparse' — 各行业方差 < 0.02 但均值 > 70%，所有行业一起死 → 管道级失败
+      'concentrated'    — 某行业零值率显著偏高，逃避零值（instruction 对该行业适配差）
+      'unknown'         — zero_by_sector 数据不足
     """
     zbs = validation_result.get("zero_by_sector", {})
     if len(zbs) < 3:
@@ -37,6 +38,10 @@ def _zero_type(validation_result: dict) -> str:
     max_z = max(vals)
     min_z = min(vals)
     if var < 0.02:
+        mean_zr = statistics.mean(vals)
+        if mean_zr > 0.70:
+            # 所有行业零值率都极高 → 不是"合法零值"，是管道级失败
+            return "systemic_sparse"
         return "uniform"
     if max_z > 0.80 and min_z < 0.40:
         return "concentrated"
